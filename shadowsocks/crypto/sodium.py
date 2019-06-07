@@ -300,10 +300,10 @@ class SodiumAeadCrypto(AeadCryptoBase):
             c_char_p(self._nonce.raw), c_char_p(self._skey)
         )
         if r != 0:
-            raise Exception("Decrypt failed")
+            raise Exception("AEAD decrypt failed")
 
         if cipher_out_len.value != clen - self._tlen:
-            raise Exception("Decrypt failed")
+            raise Exception("AEAD decrypt failed")
 
         self.cipher_ctx_init()
         return buf.raw[:cipher_out_len.value]

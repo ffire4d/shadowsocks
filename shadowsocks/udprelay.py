@@ -177,18 +177,20 @@ class UDPRelay(object):
                 data, key, iv = cryptor.decrypt_all(self._password,
                                                     self._method,
                                                     data, self._crypto_path)
-            except Exception:
-                logging.debug('UDP handle_server: decrypt data failed')
+            except Exception as error:
+                logging.error('[Port%5s] %s, UDP handle_server: decrypt data failed when handling connection from %s:%d'
+                 % (self._config['server_port'], error, r_addr[0], r_addr[1]))
                 return
             if not data:
-                logging.debug('UDP handle_server: data is empty after decrypt')
+                logging.warn('[Port%5s] UDP handle_server: data is empty after decrypt when handling connection from %s:%d'
+                 % (self._config['server_port'], r_addr[0], r_addr[1]))
                 return
         header_result = parse_header(data)
         if header_result is None:
             return
         addrtype, dest_addr, dest_port, header_length = header_result
-        logging.info("udp data to %s:%d from %s:%d"
-                     % (dest_addr, dest_port, r_addr[0], r_addr[1]))
+        logging.info("[Port%5s] UDP data to %s:%d from %s:%d"
+                     % (self._config['server_port'], dest_addr, dest_port, r_addr[0], r_addr[1]))
         if self._is_local:
             server_addr, server_port = self._get_a_server()
         else:
@@ -196,17 +198,18 @@ class UDPRelay(object):
             # spec https://shadowsocks.org/en/spec/one-time-auth.html
             self._ota_enable_session = addrtype & ADDRTYPE_AUTH
             if self._ota_enable and not self._ota_enable_session:
-                logging.warn('client one time auth is required')
+                logging.warn('[Port%5s] client one time auth is required' % self._config['server_port'])
                 return
             if self._ota_enable_session:
                 if len(data) < header_length + ONETIMEAUTH_BYTES:
-                    logging.warn('UDP one time auth header is too short')
+                    logging.warn('[Port%5s] UDP one time auth header is too short' % self._config['server_port'])
                     return
                 _hash = data[-ONETIMEAUTH_BYTES:]
                 data = data[: -ONETIMEAUTH_BYTES]
                 _key = iv + key
                 if onetimeauth_verify(_hash, data, _key) is False:
-                    logging.warn('UDP one time auth fail')
+                    logging.warn('[Port%5s] UDP one time auth fail when handling connection from %s:%d'
+                     % (self._config['server_port'], r_addr[0], r_addr[1]))
                     return
         addrs = self._dns_cache.get(server_addr, None)
         if addrs is None:

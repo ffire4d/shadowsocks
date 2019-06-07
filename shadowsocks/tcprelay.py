@@ -250,6 +250,7 @@ class TCPRelayHandler(object):
                 logging.error('write_all_to_sock:unknown socket')
         return True
 
+    @shell.exception_handle(self_=True, destroy=True, conn_err=True)
     def _handle_stage_connecting(self, data):
         if not self._is_local:
             if self._ota_enable_session:
@@ -334,25 +335,28 @@ class TCPRelayHandler(object):
         if header_result is None:
             raise Exception('can not parse header')
         addrtype, remote_addr, remote_port, header_length = header_result
-        logging.info('connecting %s:%d from %s:%d' %
-                     (common.to_str(remote_addr), remote_port,
+        logging.info('[Port%5s] connecting %s:%d from %s:%d' %
+                     (self._config['server_port'], common.to_str(remote_addr), remote_port,
                       self._client_address[0], self._client_address[1]))
         if self._is_local is False:
             # spec https://shadowsocks.org/en/spec/one-time-auth.html
             self._ota_enable_session = addrtype & ADDRTYPE_AUTH
             if self._ota_enable and not self._ota_enable_session:
-                logging.warn('client one time auth is required')
+                logging.warn('[Port%5s] client one time auth is required'
+                             % self._config['server_port'])
                 return
             if self._ota_enable_session:
                 if len(data) < header_length + ONETIMEAUTH_BYTES:
-                    logging.warn('one time auth header is too short')
+                    logging.warn('[Port%5s] one time auth header is too short'
+                                 % self._config['server_port'])
                     return None
                 offset = header_length + ONETIMEAUTH_BYTES
                 _hash = data[header_length: offset]
                 _data = data[:header_length]
                 key = self._cryptor.decipher_iv + self._cryptor.key
                 if onetimeauth_verify(_hash, _data, key) is False:
-                    logging.warn('one time auth fail')
+                    logging.warn('[Port%5s] one time auth fail when handling connection from %s:%d'
+                                 % (self._config['server_port'], self._client_address[0], self._client_address[1]))
                     self.destroy()
                     return
                 header_length += ONETIMEAUTH_BYTES
@@ -408,12 +412,12 @@ class TCPRelayHandler(object):
         remote_sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
         return remote_sock
 
-    @shell.exception_handle(self_=True)
+    @shell.exception_handle(self_=True, conn_err=True)
     def _handle_dns_resolved(self, result, error):
         if error:
             addr, port = self._client_address[0], self._client_address[1]
-            logging.error('%s when handling connection from %s:%d' %
-                          (error, addr, port))
+            logging.error('[Port%5s] %s when handling connection from %s:%d' %
+                          (self._config['server_port'], error, addr, port))
             self.destroy()
             return
         if not (result and result[1]):
@@ -480,7 +484,8 @@ class TCPRelayHandler(object):
                 index = struct.pack('>I', self._ota_chunk_idx)
                 key = self._cryptor.decipher_iv + index
                 if onetimeauth_verify(_hash, _data, key) is False:
-                    logging.warn('one time auth fail, drop chunk !')
+                    logging.warn('[Port%5s] one time auth fail when handling connection from %s:%d, drop chunk !'
+                                 % (self._config['server_port'], self._client_address[0], self._client_address[1]))
                 else:
                     unchunk_data += _data
                     self._ota_chunk_idx += 1
@@ -571,7 +576,12 @@ class TCPRelayHandler(object):
             return
         self._update_activity(len(data))
         if not is_local:
-            data = self._cryptor.decrypt(data)
+            try:
+                data = self._cryptor.decrypt(data)
+            except Exception as error:
+                logging.error("[Port%5s] %s when handling connection from %s:%d"
+                             % (self._config['server_port'], error, self._client_address[0], self._client_address[1]))
+                return
             if not data:
                 return
         if self._stage == STAGE_STREAM:
@@ -643,13 +653,17 @@ class TCPRelayHandler(object):
     def _on_local_error(self):
         logging.debug('got local error')
         if self._local_sock:
-            logging.error(eventloop.get_sock_error(self._local_sock))
+            error = eventloop.get_sock_error(self._local_sock)
+            logging.error("[Port%5s] %s when handling connection from %s:%d"
+                     % (self._config['server_port'], error, self._client_address[0], self._client_address[1]))
         self.destroy()
 
     def _on_remote_error(self):
         logging.debug('got remote error')
         if self._remote_sock:
-            logging.error(eventloop.get_sock_error(self._remote_sock))
+            error = eventloop.get_sock_error(self._remote_sock)
+            logging.error("[Port%5s] %s when handling connection from %s:%d"
+                     % (self._config['server_port'], error, self._client_address[0], self._client_address[1]))
         self.destroy()
 
     @shell.exception_handle(self_=True, destroy=True)
@@ -814,10 +828,10 @@ class TCPRelay(object):
                         break
                     else:
                         if handler.remote_address:
-                            logging.warn('timed out: %s:%d' %
-                                         handler.remote_address)
+                            logging.warn('[Port%5s] timed out: %s:%d' %
+                                         (self._listen_port, handler.remote_address[0], handler.remote_address[1]))
                         else:
-                            logging.warn('timed out')
+                            logging.warn('[Port%5s] timed out' % self._listen_port)
                         handler.destroy()
                         self._timeouts[pos] = None  # free memory
                         pos += 1

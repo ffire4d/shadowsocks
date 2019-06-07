@@ -73,8 +73,12 @@ def exception_handle(self_, err_msg=None, exit_code=None,
 
         if conn_err:
             addr, port = self._client_address[0], self._client_address[1]
-            logging.error('%s when handling connection from %s:%d' %
-                          (e, addr, port))
+            if self._is_local:
+                logging.error('%s when handling connection from %s:%d' %
+                              (e, addr, port))
+            else:
+                logging.error('[Port%5s] %s when handling connection from %s:%d' %
+                              (self._config['server_port'], e, addr, port))
         if self._config['verbose']:
             traceback.print_exc()
         if destroy:
